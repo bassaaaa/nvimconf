@@ -14,3 +14,68 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.opt_local.spell = false
   end,
 })
+
+local function refresh_snacks_explorer_git()
+  local snacks = rawget(_G, "Snacks")
+  local git_ok, git = pcall(require, "snacks.explorer.git")
+  local tree_ok, tree = pcall(require, "snacks.explorer.tree")
+
+  if not snacks or not snacks.picker or not git_ok or not tree_ok then
+    return
+  end
+
+  local explorers = snacks.picker.get({
+    source = "explorer",
+    tab = false,
+  })
+
+  for _, picker in ipairs(explorers) do
+    if not picker.closed then
+      local explorer = picker
+      local root = tree:find(explorer:cwd())
+
+      -- Snacks does not clear a directory status after Git stops
+      -- reporting that directory as untracked.
+      tree:walk(root, function(node)
+        node.dir_status = nil
+      end, { all = true })
+
+      -- Redraw even when only the rendered Git status is stale.
+      root.status = "__refresh__"
+
+      git.update(explorer:cwd(), {
+        force = true,
+        untracked = explorer.opts.git_untracked,
+        on_update = function()
+          if explorer.closed then
+            return
+          end
+
+          explorer.list:set_target()
+          explorer:find()
+        end,
+      })
+    end
+  end
+end
+
+local snacks_explorer_git_refresh_group = vim.api.nvim_create_augroup(
+  "snacks_explorer_git_refresh",
+  { clear = true }
+)
+
+vim.api.nvim_create_autocmd(
+  {
+    "BufWritePost",
+    "FocusGained",
+    "TermClose",
+    "TermLeave",
+    "ShellCmdPost",
+  },
+  {
+    group = snacks_explorer_git_refresh_group,
+    callback = refresh_snacks_explorer_git,
+  }
+)
+
+vim.schedule(refresh_snacks_explorer_git)
